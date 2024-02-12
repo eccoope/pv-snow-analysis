@@ -4,17 +4,6 @@ This repository hosts an [example analysis](https://github.com/eccoope/pv-snow-a
 published in [1], [2] to quantify snow losses and identify the snow conditions
 that contribute to losses based on a [utility-scale dataset](https://github.com/eccoope/pv-snow-analysis/blob/main/data/data.csv). Details on the system that produced the datatset (such as module parameters and the number of modules per string) are given in [config.json](https://github.com/eccoope/pv-snow-analysis/blob/main/data/config.json). Each of the system's inverters' has three DC combiner inputs. Voltage and current are measured for each of these inputs, and AC power is measured for each inverter. Daily snowfall measurements are in [snow.csv](https://github.com/eccoope/pv-snow-analysis/blob/main/data/snow.csv) and a horizon shading mask is given in [mask.json](https://github.com/eccoope/pv-snow-analysis/blob/main/data/mask.csv).
 
-```python
-base_dir = os.path.join(os.path.expanduser("~"), 'pv-snow-analysis')
-data_dir = os.path.join(base_dir, 'data')
-data_path = os.path.join(data_dir, 'data.csv')
-data = pd.read_csv(data_path, index_col='Timestamp')
-data.set_index(pd.DatetimeIndex(data.index,ambiguous='infer'), inplace=True)
-data = data[~data.index.duplicated()]
-data.between_time('8:00', '16:00').head()
-```
-
-
 
 **The analysis includes the following steps:** <br>
 

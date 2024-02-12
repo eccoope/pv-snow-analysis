@@ -1,12 +1,9 @@
 {
-    "index_col": "Timestamp",
     "tilt": "35",
     "azimuth": "225",
     "max_ac": "60.0",
     "max_dcv": "850.0",
     "min_dcv": "540.0",
-    "num_inv": "68",
-    "num_cb": "3",
     "num_mods_per_str": {
         "INV1 CB1": "18",
         "INV1 CB2": "18",
