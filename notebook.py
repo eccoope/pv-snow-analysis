@@ -1,3 +1,16 @@
+
+"""
+Modeling snow cover and ligh transmission
+=========================================
+
+Modeling the fraction of light transmitted through a hypothetical snow cover
+using onsite measured current, temperature, and POA irradiance for a
+utility-scale system. Effective transmission is then used to model voltage
+for the system, which is compared to onsite measured voltage to obtain
+a measure of the fraction of the array that is covered in opaque snow.
+
+"""
+
 #%% Import packages
 
 import pathlib
@@ -12,7 +25,11 @@ from matplotlib.dates import DateFormatter
 import matplotlib.patches as mpatches
 from pvanalytics.features import clipping
 
-#%% Define directories
+#%%
+# Read in 15-minute sampled DC voltage and current time series data, AC power,
+# module temperature collected by a BOM sensor and plane-of-array
+# irradiance data collected by a heated pyranometer. This sample is provided
+# by an electric utility.
 
 base_dir = pathlib.Path('.')
 data_dir = os.path.join(base_dir, 'data')
@@ -21,19 +38,23 @@ snow_path = os.path.join(data_dir, 'snow.csv')
 mask_path = os.path.join(data_dir, 'mask.csv')
 config_path = os.path.join(data_dir, 'config.json')
 
-# %% Load in utility data
+# Load in utility data
 data = pd.read_csv(data_path, index_col='Timestamp')
 data.set_index(pd.DatetimeIndex(data.index,ambiguous='infer'), inplace=True)
 data = data[~data.index.duplicated()]
 
-# %% Explore utility datatset
+# Explore utility datatset
 print('Utility-scale dataset')
 print('Start: {}'.format(data.index[0]))
 print('End: {}'.format(data.index[-1]))
 print('Frequency: {}'.format(data.index.inferred_freq))
 print('Columns : ' + ', '.join(data.columns))
 data.between_time('8:00', '16:00').head()
-# %% Identify current, voltage, and AC power columns
+
+# %% It is critical to set all negative or NaN voltage, current, and AC power
+# values in the dataset to 0.
+
+# Identify current, voltage, and AC power columns
 dc_voltage_cols = [c for c in data.columns if 'Voltage' in c]
 dc_current_cols = [c for c in data.columns if 'Current' in c]
 ac_power_cols = [c for c in data.columns if 'AC' in c]
@@ -48,6 +69,7 @@ data.loc[:, ac_power_cols] = np.maximum(data[ac_power_cols], 0)
 data.loc[:, dc_voltage_cols] = data[dc_voltage_cols].replace({np.nan: 0, None: 0})
 data.loc[:, dc_current_cols] = data[dc_current_cols].replace({np.nan: 0, None: 0})
 data.loc[:, ac_power_cols] = data[ac_power_cols].replace({np.nan: 0, None: 0})
+
 # %% Load in system configuration parameters (dict)
 with open(config_path) as json_data:
     config = json.load(json_data)
@@ -57,7 +79,6 @@ print(f"Inverter MPPT range: {config['min_dcv']} V - {config['max_dcv']} V")
 print(f"There are {config['num_mods_per_str']['INV1 CB1']} modules connected in series in each string, and there are {config['num_str_per_cb']['INV1 CB1']} strings connected in parallel in each combiner")
 
 # %% Plot DC voltage for each combiner input relative to inverter nameplate limits
-
 fig, ax = plt.subplots(figsize=(10,10))                  
 date_form = DateFormatter("%m/%d")
 ax.xaxis.set_major_formatter(date_form)
@@ -69,6 +90,7 @@ ax.axhline(float(config['min_dcv']), c='g', ls='--', label='Inverter turn-on vol
 ax.set_xlabel('Date', fontsize='large')
 ax.set_ylabel('Voltage [V]', fontsize='large')
 ax.legend(loc='lower left')
+
 # %% Plot AC power relative to inverter nameplate limits
 
 fig, ax = plt.subplots(figsize=(10,10))                  
@@ -82,7 +104,19 @@ ax.set_xlabel('Date', fontsize='large')
 ax.set_ylabel('AC Power [kW]', fontsize='large')
 ax.legend(loc='lower left')
 
-# %% Identify periods where the system is operating off of its maximum power point, and correct
+# %%
+# Identify periods where the system is operating off of its maximum power
+# point (MPP), and correct or mask. Conditions outside of the MPP cannot
+# be accurately modeled without external information on the system's
+# operating point. To allow us to make a valid comparison between system
+# measurements and modeled power at MMP, we set measurements collected below
+# the turn-on voltage to zero, which emulates the condition where the inverter
+# turns off when it cannot meet the turn-on voltage. When the inverter is
+# clipping, we set voltage and current measurements to NaN as these
+# measurements reflect current and voltage that has been artificially
+# adjusted away from the MMP. This masking may result in an omission of some
+# snow loss conditions where a very light-transmissive snow cover allows the
+# system to reach the inverter's clipping voltage.
 
 ac_power_cols_repeated = ac_power_cols + ac_power_cols + ac_power_cols
 for v, i, a in zip(dc_voltage_cols, dc_current_cols, ac_power_cols_repeated):
@@ -108,6 +142,7 @@ for v, i, a in zip(dc_voltage_cols, dc_current_cols, ac_power_cols_repeated):
     data.loc[mask3, v] = np.nan
     data.loc[mask3, i] = np.nan
     data.loc[mask3, a] = np.nan
+
 # %% Plot DC voltage for each combiner input relative to inverter nameplate limits
 
 fig, ax = plt.subplots(figsize=(10,10))                  
@@ -145,9 +180,17 @@ def apply_mask(mask, x ,y):
 
 data.loc[:, 'Horizon Mask'] = data.apply(lambda x: apply_mask(horizon_mask, x['azimuth'], x['elevation']), axis = 1)
 data = data[data['Horizon Mask'] == False]
-# %% Define SAPM coefficients for modeling transmission
 
-coeffs = config['sapm_coeff']
+# %% 
+
+# Define coefficients for modeling transmission and voltage. User can either
+# use the SAPM to calculate transmission or an approach based on the ratio
+# between measured current and nameplate current. For modeling voltage, the
+# user can use the SAPM or a single diode equivalent.
+
+sapm_coeffs = config['sapm_coeff']
+cec_module_db = pvlib.pvsystem.retrieve_sam('cecmod')
+sde_coeffs = cec_module_db["REC_Solar_REC340TP_72_BLK"]
 
 # %%
 """
@@ -293,6 +336,7 @@ def get_transmission(measured_e_e, modeled_e_e, current):
         Effective irradiance modeled using model_irradiance() [suns]
     current : array
         Measured current [A] at the resolution of a single module
+
     Returns
     -------
     T : array
@@ -332,18 +376,20 @@ i_scaling_factor = int(config['num_str_per_cb'][f'{inv_cb}'])
 # Approach 1
 modeled_e_e1 = get_irradiance_sapm(data['Cell Temp [C]'].values,
                      data[i].values/i_scaling_factor,
-                     coeffs['Impo'], coeffs['C0'], coeffs['C1'],
-                     coeffs['Aimp'])
+                     sapm_coeffs['Impo'], sapm_coeffs['C0'], sapm_coeffs['C1'],
+                     sapm_coeffs['Aimp'])
 T1 = pd.Series(get_transmission(data['Effective irradiance [suns]'].values, modeled_e_e1, data[i].values/i_scaling_factor),
                index=data.index)
 
 # Approach 2
 modeled_e_e2 = get_irradiance_imp(data[i].values/i_scaling_factor,
-                     coeffs['Impo'])
+                     sapm_coeffs['Impo'])
 T2 = pd.Series(get_transmission(data['Effective irradiance [suns]'].values, modeled_e_e2, data[i].values/i_scaling_factor),
                index=data.index)
 
-# %% Plot transmission calculated using two different approaches
+# %% 
+# Plot transmission calculated using two different approaches
+
 fig, ax = plt.subplots(figsize=(10,10))                             
 date_form = DateFormatter("%m/%d \n%H:%M")
 ax.xaxis.set_major_formatter(date_form)
@@ -358,22 +404,52 @@ ax.legend()
 ax.set_ylabel('Transmission', fontsize='xx-large')
 ax.set_xlabel('Date + Time', fontsize='large')
 
-# %% Model voltage using calculated transmission
-v_scaling_factor = int(config['num_mods_per_str'][inv_cb])
-modeled_vmp = pvlib.pvsystem.sapm(data['POA [W/m²]']*T1,
-                                  data['Cell Temp [C]'],
-                                  coeffs)['v_mp']
+# %% 
+# Model voltage using calculated transmission (two different approaches)
 
-name_modeled_vmp = inv_cb + ' Predicted Vmp from Imp'
-data[name_modeled_vmp] = v_scaling_factor*modeled_vmp
+v_scaling_factor = int(config['num_mods_per_str'][inv_cb])
+
+# Approach 1
+modeled_vmp_sapm = pvlib.pvsystem.sapm(data['POA [W/m²]']*T1,
+                                  data['Cell Temp [C]'],
+                                  sapm_coeffs)['v_mp']*v_scaling_factor
+
+# Approach 2
+# Code borrowed from pvlib-python/docs/examples/iv-modeling/plot_singlediode.py
+
+# adjust the reference parameters according to the operating
+# conditions using the De Soto model:
+IL, I0, Rs, Rsh, nNsVth = pvlib.pvsystem.calcparams_desoto(
+    data['POA [W/m²]']*T1,
+    data['Cell Temp [C]'],
+    alpha_sc=sde_coeffs['alpha_sc'],
+    a_ref=sde_coeffs['a_ref'],
+    I_L_ref=sde_coeffs['I_L_ref'],
+    I_o_ref=sde_coeffs['I_o_ref'],
+    R_sh_ref=sde_coeffs['R_sh_ref'],
+    R_s=sde_coeffs['R_s'],
+   )
+
+# plug the parameters into the SDE and solve for IV curves:
+SDE_params = {
+    'photocurrent': IL,
+    'saturation_current': I0,
+    'resistance_series': Rs,
+    'resistance_shunt': Rsh,
+    'nNsVth': nNsVth
+}
+modeled_vmp_sde = pvlib.pvsystem.singlediode(method='lambertw', **SDE_params)['v_mp']*v_scaling_factor
 
 # %% Plot modeled and measured voltage
+
 fig, ax = plt.subplots(figsize=(10,10))                             
 date_form = DateFormatter("%H:%M")
 ax.xaxis.set_major_formatter(date_form)
-temp = data['2022-01-06 07:45:00': '2022-01-09 17:45:00']
-ax.scatter(temp.index, temp[name_modeled_vmp], s=1, c='b', label='Modeled')
-ax.scatter(temp.index, temp[inv_cb + ' Voltage [V]'], s=1, c = 'g', label='Measured')
+
+ax.scatter(modeled_vmp_sapm.index, modeled_vmp_sapm, s=1, c='b', label='SAPM')
+ax.scatter(modeled_vmp_sde.index, modeled_vmp_sde, s=1, c='g', label='SDE')
+
+ax.scatter(data.index, data[inv_cb + ' Voltage [V]'], s=1, c = 'r', label='Measured')
 ax.legend(fontsize='xx-large')
 ax.set_ylabel('Voltage [V]', fontsize='xx-large')
 ax.set_xlabel('Date', fontsize='large')
@@ -444,12 +520,17 @@ def categorize(vmp_ratio, transmission, voltage, turn_on_voltage,
             return 4
     return np.nan
 
-# %% Calculate transmission, model voltage, and categorize for given voltage, current pair
-
 def wrapper(voltage, current, temp_cell, effective_irradiance,
             coeffs, config, temp_ref=25, irrad_ref=1000):
     
     '''
+    Models effective irradiance based on measured current using the SAPM
+    calculates transmission, and uses transmission to model voltage with the
+    SAPM. Categorizes each data point as mode 0 -4 based on transmission and
+    the ratio between measured and modeled votlage.
+
+    Parameters
+    ----------
     voltage : array
         Voltage [V] measured at inverter
     current : array
@@ -474,6 +555,12 @@ def wrapper(voltage, current, temp_cell, effective_irradiance,
             conditions, determined empirically
         number_mods_per_str : int
         number_str_per_cb : int
+    
+    Returns
+    -------
+    my_dict : dict
+        Keys are "transmission", "modeled_vmp", "vmp_ratio", and "mode"
+    
     '''
     
     # Calculate transmission
@@ -512,7 +599,9 @@ def wrapper(voltage, current, temp_cell, effective_irradiance,
     
     return my_dict
 
-# %% Demonstrate transmission, modeled voltage calculation and mode categorization on voltage, current pair
+# %% 
+# Demonstrate transmission, modeled voltage calculation and mode categorization on voltage, current pair
+
 j = 0
 v = dc_voltage_cols[j]
 i = dc_current_cols[j]
@@ -534,10 +623,12 @@ my_config = {'threshold_vratio' : threshold_vratio,
 
 out = wrapper(data[v].values, data[i].values,
               data['Cell Temp [C]'].values,
-              data['POA [W/m²]'].values, coeffs,
+              data['POA [W/m²]'].values, sapm_coeffs,
               my_config)
 
-# %% Calculate transmission, model voltage, and categorize into modes for all pairs of DC inputs
+# %%
+# Calculate transmission, model voltage, and categorize into modes for all pairs of DC inputs
+# using the SAPm to calculate transmission and model voltage
 
 for v_col, i_col in zip(dc_voltage_cols, dc_current_cols):
     
@@ -558,14 +649,16 @@ for v_col, i_col in zip(dc_voltage_cols, dc_current_cols):
     
     out = wrapper(data[v_col].values, data[i_col].values,
               data['Cell Temp [C]'].values,
-              data['POA [W/m²]'].values, coeffs,
+              data['POA [W/m²]'].values, sapm_coeffs,
               my_config)
     
     for k, v in out.items():
         data[inv_cb + ' ' + k] = v
 
 
-# %% Look at transmission for all DC inputs
+# %%
+# Look at transmission for all DC inputs
+        
 transmission_cols = [c for c in data.columns if 'transmission' in c]
 fig, ax = plt.subplots(figsize=(10,10))                             
 date_form = DateFormatter("%m/%d")
@@ -577,7 +670,9 @@ for c in transmission_cols:
 ax.set_xlabel('Date', fontsize='xx-large')
 ax.legend()
 
-# %% Look at voltage ratios for all DC inputs
+# %%
+# Look at voltage ratios for all DC inputs
+
 vratio_cols = [c for c in data.columns if "vmp_ratio" in c]
 fig, ax = plt.subplots(figsize=(10,10))                             
 date_form = DateFormatter("%m/%d")
@@ -596,7 +691,7 @@ ax.legend();
 
 modeled_df = pvlib.pvsystem.sapm(data['POA [W/m²]'],
                                  data['Cell Temp [C]'],
-                                 coeffs)
+                                 sapm_coeffs)
 
 for v_col, i_col in zip(dc_voltage_cols, dc_current_cols):
     matched = re.match(r'INV(\d+) CB(\d+) Current', i_col)
@@ -618,7 +713,8 @@ for v_col, i_col in zip(dc_voltage_cols, dc_current_cols):
     
 snow = pd.read_csv(snow_path, index_col='DATE')
 
-# %% Plot power losses, color points by mode
+# Plot power losses, color points by mode
+# Plot daily snowfall
 
 loss_cols = [c for c in data.columns if "Loss" in c]
 mode_cols = [c for c in data.columns if "mode" in c and "modeled" not in c]
@@ -670,7 +766,8 @@ ax2.bar(days, snow['SNOW'].values/(10*2.54), color='b', alpha=0.5, width=0.2, ec
 ax2.set_ylabel('Snowfall [in]', c='b', fontsize='xx-large', alpha=0.5);
 
 
-# %% Calculate daily snow losses
+# %% 
+# Calculate daily snow losses
 
 loss_cols = [c for c in data.columns if "Loss" in c]
 mode_cols = [c for c in data.columns if "mode" in c and "modeled" not in c]
@@ -710,4 +807,3 @@ ax.set_ylabel('Snow loss [%]')
 ax.set_xticks(xvals, days)
 ax.xaxis.set_major_formatter(date_form);       
 
-# %%
