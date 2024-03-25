@@ -1,4 +1,4 @@
-#%%
+#%% Import packages
 
 import pathlib
 import os
@@ -7,13 +7,12 @@ import pandas as pd
 import numpy as np
 import re
 import pvlib
-from scipy.integrate import trapezoid
 import matplotlib.pyplot as plt
 from matplotlib.dates import DateFormatter
 import matplotlib.patches as mpatches
 from pvanalytics.features import clipping
 
-#%%
+#%% Define directories
 
 base_dir = pathlib.Path('.')
 data_dir = os.path.join(base_dir, 'data')
@@ -22,17 +21,17 @@ snow_path = os.path.join(data_dir, 'snow.csv')
 mask_path = os.path.join(data_dir, 'mask.csv')
 config_path = os.path.join(data_dir, 'config.json')
 
-# %%
+# %% Load in utility data
 data = pd.read_csv(data_path, index_col='Timestamp')
 data.set_index(pd.DatetimeIndex(data.index,ambiguous='infer'), inplace=True)
 data = data[~data.index.duplicated()]
-# %%
+
+# %% Explore utility datatset
 print('Utility-scale dataset')
 print('Start: {}'.format(data.index[0]))
 print('End: {}'.format(data.index[-1]))
 print('Frequency: {}'.format(data.index.inferred_freq))
 print('Columns : ' + ', '.join(data.columns))
-# %%
 data.between_time('8:00', '16:00').head()
 # %% Identify current, voltage, and AC power columns
 dc_voltage_cols = [c for c in data.columns if 'Voltage' in c]
@@ -155,7 +154,7 @@ coeffs = config['sapm_coeff']
 Model cell temperature using procedure outlined in Eqn. 12 of [1]
 and model effective irradiance using Eqn. 23 of [2].
 
-[1] King, D.L., E.E. Boyson, and J.A. Kratochvil, Photovoltaic Array
+[1] D. L. King, E.E. Boyson, and J.A. Kratochvil, Photovoltaic Array
 Performance Model, SAND2004-3535, Sandia National Laboratories,
 Albuquerque, NM, 2004.
 [2] B. H. King, C. W. Hansen, D. Riley, C. D. Robinson and L. Pratt,
@@ -210,7 +209,7 @@ def _solve_quadratic_eqn(a, b, c):
     x = (-b + np.sqrt(discriminant))/(2*a)
     return x
 
-def get_irradiance(temp_cell,
+def get_irradiance_sapm(temp_cell,
                      current, imp0, c0,
                      c1, alpha_imp,
                      temp_ref=25):
@@ -223,9 +222,6 @@ def get_irradiance(temp_cell,
         Temperature of cells inside module [degrees C]
     current : array
         Measured current [A] at the resolution of a single module
-    measured_e_e : array
-        Effective irradiance to which the PV cells in the module respond
-        measured by a heated plane-of-array pyranometer [suns]
     imp0 : float
         Namplate short-circuit current[A]
     c0, c1 : float
@@ -242,7 +238,7 @@ def get_irradiance(temp_cell,
         Effective irradiance [suns]
 
 
-    [1] King, D.L., E.E. Boyson, and J.A. Kratochvil, Photovoltaic Array
+    [1] D. L. King, E.E. Boyson, and J.A. Kratochvil, Photovoltaic Array
     Performance Model, SAND2004-3535, Sandia National Laboratories,
     Albuquerque, NM, 2004.
     
@@ -253,6 +249,34 @@ def get_irradiance(temp_cell,
     c = _c_func(current)
     effective_irradiance = _solve_quadratic_eqn(a, b, c)
     return effective_irradiance
+
+def get_irradiance_imp(current, imp0, g_ref=1000):
+    """
+    Calculates effective irradiance using eqn. 8 from [1]
+
+    Parameters
+    ----------
+    current : array
+        Measured current [A] at the resolution of a single module
+    imp0 : float
+        Namplate short-circuit current[A]
+
+    Returns
+    -------
+    effective_irradiance : array
+        Effective irradiance [suns]
+
+
+    [1] C. F. Abe, J. B. Dias, G. Notton, G. A. Faggianelli, G. Pigelet, and
+    D. Ouvrard, David, Estimation of the effective irradiance and bifacial
+    gain for PV arrays using the maximum power current, IEEE Journal of
+    Photovoltaics, 2022.
+    
+    """
+
+    effective_irradiance = current/imp0
+    return effective_irradiance
+
 
 def get_transmission(measured_e_e, modeled_e_e, current):
     
@@ -274,7 +298,7 @@ def get_transmission(measured_e_e, modeled_e_e, current):
     T : array
         Effective transmission [dimensionless]
 
-    [2] E. C. Cooper, J. L. Braid and L. M. Burnham, "Identifying the
+    [1] E. C. Cooper, J. L. Braid and L. Burnham, "Identifying the
     Electrical Signature of Snow in Photovoltaic Inverter Data," 2023 IEEE
     50th Photovoltaic Specialists Conference (PVSC), San Juan, PR, USA, 2023,
     pp. 1-5, doi: 10.1109/PVSC48320.2023.10360065.
@@ -287,7 +311,9 @@ def get_transmission(measured_e_e, modeled_e_e, current):
     T[T > 1] = 1
 
     return T
-# %% Demonstrate transmission calculation
+# %% Demonstrate transmission calculation using two different approaches to
+# modeling effective irradiance
+
 j = 0
 v = dc_voltage_cols[j]
 i = dc_current_cols[j]
@@ -300,30 +326,41 @@ inv_cb = matched.group(0)
 # Used to scale measured current down to the resolution
 # of a single string connected in series, which should
 # be the same current as is 
+
 i_scaling_factor = int(config['num_str_per_cb'][f'{inv_cb}'])
 
-modeled_e_e = get_irradiance(data['Cell Temp [C]'].values,
+# Approach 1
+modeled_e_e1 = get_irradiance_sapm(data['Cell Temp [C]'].values,
                      data[i].values/i_scaling_factor,
                      coeffs['Impo'], coeffs['C0'], coeffs['C1'],
                      coeffs['Aimp'])
-T = get_transmission(data['Effective irradiance [suns]'].values, modeled_e_e, data[i].values/i_scaling_factor)
-name_T = inv_cb + ' Transmission'
-data[name_T] = T
+T1 = pd.Series(get_transmission(data['Effective irradiance [suns]'].values, modeled_e_e1, data[i].values/i_scaling_factor),
+               index=data.index)
 
-# %% Plot transmission
+# Approach 2
+modeled_e_e2 = get_irradiance_imp(data[i].values/i_scaling_factor,
+                     coeffs['Impo'])
+T2 = pd.Series(get_transmission(data['Effective irradiance [suns]'].values, modeled_e_e2, data[i].values/i_scaling_factor),
+               index=data.index)
+
+# %% Plot transmission calculated using two different approaches
 fig, ax = plt.subplots(figsize=(10,10))                             
 date_form = DateFormatter("%m/%d \n%H:%M")
 ax.xaxis.set_major_formatter(date_form)
-temp = data[: '2022-01-09 17:45:00']
 
-ax.scatter(temp.index, temp[name_T], s=0.5, c='b')
-ax.plot(temp.index, temp[name_T], alpha=0.3, c='b')
-ax.set_ylabel(name_T, c='b', fontsize='xx-large')
+ax.scatter(T1.index, T1, s=0.5, c='b', label='get_irradiance1')
+ax.plot(T1.index, T1, alpha=0.3, c='b')
+
+ax.scatter(T2.index, T2, s=0.3, c='g', label='get_irradiance2')
+ax.plot(T2.index, T2, alpha=0.3, c='g')
+
+ax.legend()
+ax.set_ylabel('Transmission', fontsize='xx-large')
 ax.set_xlabel('Date + Time', fontsize='large')
 
 # %% Model voltage using calculated transmission
 v_scaling_factor = int(config['num_mods_per_str'][inv_cb])
-modeled_vmp = pvlib.pvsystem.sapm(data['POA [W/m²]']*T,
+modeled_vmp = pvlib.pvsystem.sapm(data['POA [W/m²]']*T1,
                                   data['Cell Temp [C]'],
                                   coeffs)['v_mp']
 
@@ -440,7 +477,7 @@ def wrapper(voltage, current, temp_cell, effective_irradiance,
     '''
     
     # Calculate transmission
-    modeled_e_e = get_irradiance(temp_cell, current/config['number_str_per_cb'], coeffs['Impo'],
+    modeled_e_e = get_irradiance_sapm(temp_cell, current/config['number_str_per_cb'], coeffs['Impo'],
                                  coeffs['C0'], coeffs['C1'], coeffs['Aimp'], temp_ref=temp_ref)
     T = get_transmission(effective_irradiance/irrad_ref, modeled_e_e,
                          current/config['number_str_per_cb'])
@@ -499,16 +536,6 @@ out = wrapper(data[v].values, data[i].values,
               data['Cell Temp [C]'].values,
               data['POA [W/m²]'].values, coeffs,
               my_config)
-
-
-# %% Look at transmission
-fig, ax = plt.subplots(figsize=(10,10))                             
-date_form = DateFormatter("%m/%d")
-ax.xaxis.set_major_formatter(date_form)
-ax.scatter(data.index, out['transmission'], s=0.5)
-ax.plot(data.index, out['transmission'], alpha=0.2)
-ax.set_ylabel('Transmission', fontsize='xx-large')
-ax.set_xlabel('Date', fontsize='xx-large');
 
 # %% Calculate transmission, model voltage, and categorize into modes for all pairs of DC inputs
 
