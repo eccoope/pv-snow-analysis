@@ -27,5 +27,5 @@ that contribute to losses based on a [utility-scale dataset](https://github.com/
     pp. 1-5, doi: 10.1109/PVSC48320.2023.10360065.
 
 [2] E. C. Cooper, L. Burnham, J. L. Braid, "Photovoltaic inverter-based
-    quantification of snow conditions and power loss, EPJ Photovoltaics,
-    *Pending* (2024).
+    quantification of snow conditions and power loss, EPJ Photovoltaics 15, 6 (2024),
+    doi: 10.1051/epjpv/2024004.
