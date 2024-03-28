@@ -248,13 +248,23 @@ config_path = os.path.join(data_dir, 'config.json')
 with open(config_path) as json_data:
     config = json.load(json_data)
 
-print(f"Inverter AC power rating: {config['max_ac']} kW")
-print(f"Inverter MPPT range: {config['min_dcv']} V - {config['max_dcv']} V")
+#%% Retrieve and print system inverter specs and electrical configuration
+    
+cec_inverter_db = pvlib.pvsystem.retrieve_sam('CECInverter')
+my_inverter = cec_inverter_db[config['inverter']]
+
+max_ac_power = my_inverter['Paco']*0.001 # originally in [W], converted to [kW]
+mppt_low_voltage = my_inverter['Mppt_low'] # [V]
+mppt_high_voltage = my_inverter['Mppt_high'] # [V]
+
+print(f"Inverter AC power rating: {max_ac_power} kW")
+print(f"Inverter MPPT range: {mppt_low_voltage} V - {mppt_high_voltage} V")
 num_str_per_cb = config['num_str_per_cb']['INV1 CB1']
 num_mods_per_str = config['num_mods_per_str']['INV1 CB1']
 print(f"There are {num_str_per_cb} modules connected in series in each string,"
       f" and there are {num_mods_per_str} strings connected in"
       f" parallel at each combiner")
+
 
 #%%
 # Read in 15-minute sampled DC voltage and current time series data, AC power,
@@ -298,10 +308,10 @@ ax.xaxis.set_major_formatter(date_form)
 for v in dc_voltage_cols:
     ax.scatter(data.index, data[v], s=0.5, label=v)
     ax.plot(data.index, data[v], alpha=0.2)
-ax.axhline(float(config['max_dcv']), c='r', ls='--',
-           label='Maximum MPPT voltage: {} V'.format(config['max_dcv']))
-ax.axhline(float(config['min_dcv']), c='g', ls='--',
-           label='Minimum MPPT voltage: {} V'.format(config['min_dcv']))
+ax.axhline(mppt_high_voltage, c='r', ls='--',
+           label='Maximum MPPT voltage: {} V'.format(mppt_high_voltage))
+ax.axhline(mppt_low_voltage, c='g', ls='--',
+           label='Minimum MPPT voltage: {} V'.format(mppt_low_voltage))
 ax.set_xlabel('Date', fontsize='large')
 ax.set_ylabel('Voltage [V]', fontsize='large')
 ax.legend(loc='lower left')
@@ -314,8 +324,8 @@ ax.xaxis.set_major_formatter(date_form)
 for a in ac_power_cols:
     ax.scatter(data.index, data[a], s=0.5, label=a)
     ax.plot(data.index, data[a], alpha=0.2)
-ax.axhline(float(config['max_ac']), c='r', ls='--',
-           label='Maximum allowed AC power: {} kW'.format(config['max_ac']))
+ax.axhline(max_ac_power, c='r', ls='--',
+           label='Maximum allowed AC power: {} kW'.format(max_ac_power))
 ax.set_xlabel('Date', fontsize='large')
 ax.set_ylabel('AC Power [kW]', fontsize='large')
 ax.legend(loc='upper left')
@@ -338,20 +348,20 @@ ac_power_cols_repeated = ac_power_cols + ac_power_cols + ac_power_cols
 for v, i, a in zip(dc_voltage_cols, dc_current_cols, ac_power_cols_repeated):
 
     # Data where V > MPPT maximum
-    data.loc[(data[v] > float(config['max_dcv'])), v] = np.nan
-    data.loc[(data[v] > float(config['max_dcv'])), i] = np.nan
-    data.loc[(data[v] > float(config['max_dcv'])), a] = np.nan
+    data.loc[data[v] > mppt_high_voltage, v] = np.nan
+    data.loc[data[v] > mppt_high_voltage, i] = np.nan
+    data.loc[data[v] > mppt_high_voltage, a] = np.nan
     
     # Data where V < MPPT minimum
-    data.loc[data[v] < float(config['min_dcv']), v] = 0
-    data.loc[data[v] < float(config['min_dcv']), i] = 0
-    data.loc[data[v] < float(config['min_dcv']), a] = 0
+    data.loc[data[v] < mppt_low_voltage, v] = 0
+    data.loc[data[v] < mppt_low_voltage, i] = 0
+    data.loc[data[v] < mppt_low_voltage, a] = 0
     
     # Data where system is at Voc
     data.loc[data[i] == 0, v] = 0
 
     # Data where inverter is clipping based on AC power
-    mask1 = data[a] > float(config['max_ac'])
+    mask1 = data[a] > max_ac_power
     mask2 = clipping.geometric(ac_power=data[a], freq='15T')
     mask3 = np.logical_or(mask1.values, mask2.values)
 
@@ -367,10 +377,10 @@ ax.xaxis.set_major_formatter(date_form)
 for v in dc_voltage_cols:
     ax.scatter(data.index, data[v], s=0.5, label=v)
     ax.plot(data.index, data[v], alpha=0.2)
-ax.axhline(float(config['max_dcv']), c='r', ls='--',
-           label='MPPT maximum: {} V'.format(config['max_dcv']))
-ax.axhline(float(config['min_dcv']), c='g', ls='--',
-           label='MPPT minimum: {} V'.format(config['min_dcv']))
+ax.axhline(mppt_high_voltage, c='r', ls='--',
+           label='Maximum MPPT voltage: {} V'.format(mppt_high_voltage))
+ax.axhline(mppt_low_voltage, c='g', ls='--',
+           label='Minimum MPPT voltage: {} V'.format(mppt_low_voltage))
 ax.set_xlabel('Date', fontsize='large')
 ax.set_ylabel('Voltage [V]', fontsize='large')
 ax.legend(loc='lower left')
@@ -410,7 +420,7 @@ data = data[data['Horizon Mask'] == False]
 
 sapm_coeffs = config['sapm_coeff']
 cec_module_db = pvlib.pvsystem.retrieve_sam('cecmod')
-sde_coeffs = cec_module_db["REC_Solar_REC340TP_72_BLK"]
+sde_coeffs = cec_module_db[config['panel']]
 
 # %%
 """
@@ -603,7 +613,7 @@ def wrapper(voltage, current, temp_cell, effective_irradiance,
 
     # Model voltage for a single module, scale up to array
     modeled_vmp = pvlib.pvsystem.sapm(effective_irradiance*T, temp_cell, 
-                                      coeffs)['v_mp']
+                                      coeffs)['v_mp'].values
     modeled_vmp *= config['num_mods_per_str']
 
     # Voltage is modeled as NaN if T = 0, but V = 0 makes more sense
@@ -615,6 +625,8 @@ def wrapper(voltage, current, temp_cell, effective_irradiance,
     modeled_vmp[modeled_vmp < config['min_dcv']] = 0
 
     # Calculate voltage ratio
+    # Both quantities in the "where" argument of np.divide must be arrays, or
+    # else a RecursionError is raised
     with np.errstate(divide='ignore'):
         vmp_ratio = np.divide(voltage, modeled_vmp,
                               where=((voltage > 0) & (modeled_vmp>0)))
@@ -652,12 +664,12 @@ threshold_vratio, threshold_t = 0.9331598025404861, 0.5976185185741869
 
 my_config = {'threshold_vratio' : threshold_vratio,
              'threshold_transmission' : threshold_t,
-             'min_dcv' : float(config['min_dcv']),
-             'max_dcv' : float(config['max_dcv']),
+             'min_dcv' : mppt_low_voltage,
+             'max_dcv' : mppt_high_voltage,
              'num_str_per_cb' : int(config['num_str_per_cb'][f'{inv_cb}']),
              'num_mods_per_str' : int(config['num_mods_per_str'][f'{inv_cb}'])}
 
-out = wrapper(data[v], data[i],
+out = wrapper(data[v].values, data[i].values,
               data['Cell Temp [C]'],
               data['POA [W/m²]'], sapm_coeffs,
               my_config)
@@ -680,12 +692,12 @@ for v_col, i_col in zip(dc_voltage_cols, dc_current_cols):
     my_config = {
         'threshold_vratio' : threshold_vratio,
         'threshold_transmission' : threshold_t,
-        'min_dcv' : float(config['min_dcv']),
-        'max_dcv' : float(config['max_dcv']),
+        'min_dcv' : mppt_low_voltage,
+        'max_dcv' : mppt_high_voltage,
         'num_str_per_cb' : int(config['num_str_per_cb'][f'{inv_cb}']),
         'num_mods_per_str' : int(config['num_mods_per_str'][f'{inv_cb}'])}
     
-    out = wrapper(data[v_col], data[i_col],
+    out = wrapper(data[v_col].values, data[i_col],
               data['Cell Temp [C]'],
               data['POA [W/m²]'], sapm_coeffs,
               my_config)
@@ -750,7 +762,8 @@ for v_col, i_col in zip(dc_voltage_cols, dc_current_cols):
 
 # %%
     
-snow = pd.read_csv(snow_path, index_col='DATE')
+snow = pd.read_csv(snow_path, index_col='DATE') # originally in [mm]
+snow['SNOW'] *= 1/(10*2.54) # convert to [in]
 
 # Plot power losses, color points by mode
 # Plot daily snowfall
@@ -770,6 +783,8 @@ cmap = {0 : 'r',
         2: 'r',
         3: 'r',
         4: 'g'}
+
+# DATES ARE OFFSET
 
 fig, ax = plt.subplots(figsize=(10,10))                             
 date_form = DateFormatter("%m/%d")
@@ -803,7 +818,7 @@ ax.set_ylabel('DC Power [W]', fontsize='xx-large')
 ax.legend(handles=handles, fontsize='xx-large', loc='upper right')
 
 ax2 = ax.twinx()
-ax2.bar(days, snow['SNOW'].values/(10*2.54), color='b', alpha=0.5, width=0.2,
+ax2.bar(days, snow['SNOW'].values, color='b', alpha=0.5, width=0.2,
         ec='k')
 ax2.set_ylabel('Snowfall [in]', c='b', fontsize='xx-large', alpha=0.5);
 
@@ -847,6 +862,8 @@ for i, c in enumerate(columns):
            ec='k', label=c)
 
 ax.legend()
-ax.set_ylabel('Snow loss [%]')
+ax.set_ylabel('Losses occurring while snow is present [%]')
 ax.set_xticks(xvals, days)
 ax.xaxis.set_major_formatter(date_form);       
+
+# %%

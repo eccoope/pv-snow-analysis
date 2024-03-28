@@ -1,7 +1,5 @@
-{
-    "max_ac": "60.0",
-    "max_dcv": "850.0",
-    "min_dcv": "540.0",
+{   "panel": "REC_Solar_REC340TP_72_BLK",
+    "inverter" : "Yaskawa_Solectria_Solar__PVI_60TL_480__480V_",
     "num_mods_per_str": {
         "INV1 CB1": "18",
         "INV1 CB2": "18",
@@ -67,7 +65,5 @@
         "C6": NaN,
         "C7": NaN,
         "Notes": "Source:  CFV Solar Test Lab.  Tested 2013.  Module 13022-11"
-    },
-    "panel": "REC_Solar_REC340TP_72_BLK",
-    "inverter_efficiency": 0.985
+    }
 }
