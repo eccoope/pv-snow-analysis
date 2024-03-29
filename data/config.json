@@ -1,5 +1,7 @@
 {   "panel": "REC_Solar_REC340TP_72_BLK",
     "inverter" : "Yaskawa_Solectria_Solar__PVI_60TL_480__480V_",
+    "threshold_vratio" : 0.933,
+    "threshold_transmission" : 0.598,
     "num_mods_per_str": {
         "INV1 CB1": "18",
         "INV1 CB2": "18",
