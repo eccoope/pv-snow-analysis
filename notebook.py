@@ -478,7 +478,7 @@ T1 = get_transmission(data['POA [W/m²]'], modeled_e_e1, imp)
 # Approach 2 using a linear irradiance-Imp model
 modeled_e_e2 = get_irradiance_imp(imp, sapm_coeffs['Impo'])
 
-T2 = get_transmission(data['POA [W/m²]'].values, modeled_e_e2, imp)
+T2 = get_transmission(data['POA [W/m²]'], modeled_e_e2, imp)
 
 # %% 
 # Plot transmission calculated using two different approaches
@@ -613,7 +613,7 @@ def wrapper(voltage, current, temp_cell, effective_irradiance,
 
     # Model voltage for a single module, scale up to array
     modeled_vmp = pvlib.pvsystem.sapm(effective_irradiance*T, temp_cell, 
-                                      coeffs)['v_mp'].values
+                                      coeffs)['v_mp']
     modeled_vmp *= config['num_mods_per_str']
 
     # Voltage is modeled as NaN if T = 0, but V = 0 makes more sense
@@ -625,12 +625,17 @@ def wrapper(voltage, current, temp_cell, effective_irradiance,
     modeled_vmp[modeled_vmp < config['min_dcv']] = 0
 
     # Calculate voltage ratio
+    with np.errstate(divide='ignore'):
+        vmp_ratio = voltage / modeled_vmp
+    
+    # take care of divide by zero
+    vmp_ratio[modeled_vmp==0] = 0
     # Both quantities in the "where" argument of np.divide must be arrays, or
     # else a RecursionError is raised
-    with np.errstate(divide='ignore'):
-        vmp_ratio = np.divide(voltage, modeled_vmp,
-                              where=((voltage > 0) & (modeled_vmp>0)))
-    vmp_ratio[modeled_vmp==0] = 0
+
+    #     vmp_ratio = np.divide(voltage, modeled_vmp,
+    #                           where=((voltage > 0) & (modeled_vmp>0)))
+    # vmp_ratio[modeled_vmp==0] = 0
     
     categorize_v = np.vectorize(categorize)
 
@@ -669,7 +674,7 @@ my_config = {'threshold_vratio' : threshold_vratio,
              'num_str_per_cb' : int(config['num_str_per_cb'][f'{inv_cb}']),
              'num_mods_per_str' : int(config['num_mods_per_str'][f'{inv_cb}'])}
 
-out = wrapper(data[v].values, data[i].values,
+out = wrapper(data[v], data[i],
               data['Cell Temp [C]'],
               data['POA [W/m²]'], sapm_coeffs,
               my_config)
@@ -697,7 +702,7 @@ for v_col, i_col in zip(dc_voltage_cols, dc_current_cols):
         'num_str_per_cb' : int(config['num_str_per_cb'][f'{inv_cb}']),
         'num_mods_per_str' : int(config['num_mods_per_str'][f'{inv_cb}'])}
     
-    out = wrapper(data[v_col].values, data[i_col],
+    out = wrapper(data[v_col], data[i_col],
               data['Cell Temp [C]'],
               data['POA [W/m²]'], sapm_coeffs,
               my_config)
