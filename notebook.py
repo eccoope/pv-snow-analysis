@@ -47,6 +47,7 @@ import pvlib
 import matplotlib.pyplot as plt
 from matplotlib.dates import DateFormatter
 import matplotlib.patches as mpatches
+from matplotlib.lines import Line2D
 from pvanalytics.features import clipping
 
 #%% Functions needed for the analysis procedure
@@ -664,11 +665,22 @@ inv_cb = matched.group(0)
 # Number of strings connected in parallel at the combiner
 i_scaling_factor = int(config['num_str_per_cb'][f'{inv_cb}'])
 
-# %TODO: should we make these defaults in categorize()?
-threshold_vratio, threshold_t = 0.9331598025404861, 0.5976185185741869
+# threshold_vratio and threshold-transmission were empirically determined
+# using data collected on this system over five summers. Transmission and
+# vratio were calculated for all data collected in the summer (under the
+# assumption that there was no snow present at this time), and histograms
+# of the spread of transmission and vratio values were made.
+# threshold_vratio is the lower bound on the 95th percentile of all vratios
+# calculated for summer data - as in, 95% of all data collected in the summer
+# has a vratio that is higher than threshold_vratio. threshold_transmission
+# is the same value, but for transmission calculated from data recorded
+# during the summer.
+
+threshold_vratio = config['threshold_vratio']
+threshold_transmission = config['threshold_transmission']
 
 my_config = {'threshold_vratio' : threshold_vratio,
-             'threshold_transmission' : threshold_t,
+             'threshold_transmission' : threshold_transmission,
              'min_dcv' : mppt_low_voltage,
              'max_dcv' : mppt_high_voltage,
              'num_str_per_cb' : int(config['num_str_per_cb'][f'{inv_cb}']),
@@ -696,7 +708,7 @@ for v_col, i_col in zip(dc_voltage_cols, dc_current_cols):
     
     my_config = {
         'threshold_vratio' : threshold_vratio,
-        'threshold_transmission' : threshold_t,
+        'threshold_transmission' : threshold_transmission,
         'min_dcv' : mppt_low_voltage,
         'max_dcv' : mppt_high_voltage,
         'num_str_per_cb' : int(config['num_str_per_cb'][f'{inv_cb}']),
@@ -766,12 +778,6 @@ for v_col, i_col in zip(dc_voltage_cols, dc_current_cols):
     data[name_loss] = loss
 
 # %%
-    
-snow = pd.read_csv(snow_path, index_col='DATE') # originally in [mm]
-snow['SNOW'] *= 1/(10*2.54) # convert to [in]
-
-# Plot power losses, color points by mode
-# Plot daily snowfall
 
 loss_cols = [c for c in data.columns if "Loss" in c]
 mode_cols = [c for c in data.columns if "mode" in c and "modeled" not in c]
@@ -782,14 +788,12 @@ l = loss_cols[i]
 m = mode_cols[i]
 p = modeled_power_cols[i]
 
-# (Green = no snow, Red = snow)
+# Color intervals by mode
 cmap = {0 : 'r',
-        1: 'r',
-        2: 'r',
-        3: 'r',
+        1: 'b',
+        2: 'yellow',
+        3: 'cyan',
         4: 'g'}
-
-# DATES ARE OFFSET
 
 fig, ax = plt.subplots(figsize=(10,10))                             
 date_form = DateFormatter("%m/%d")
@@ -803,33 +807,62 @@ grouped = temp.groupby(days_mapped)
 
 for d in days:
         temp_grouped = grouped.get_group(d)
-        ax.plot(temp_grouped.index, temp_grouped[p], c='k', alpha=0.2)
-        ax.scatter(temp_grouped.index, temp_grouped[p] - temp_grouped[l],
-                   c=temp_grouped[m].map(cmap), s=1)
+        ax.plot(temp_grouped.index, temp_grouped[p], c='k', ls='--')
+        ax.plot(temp_grouped.index, temp_grouped[p]- temp_grouped[l], c='k')
         ax.fill_between(temp_grouped.index, temp_grouped[p] - temp_grouped[l],
-                        temp_grouped[p], color='y', alpha=0.4)
+                        temp_grouped[p], color='k', alpha=0.2)
 
-# Add different colored points to legend
+        chng_pts = np.ravel(np.where(temp_grouped[m].values[:-1] 
+                                     - temp_grouped[m].values[1:] != 0))
+
+        if len(chng_pts) == 0:
+            ax.axvspan(temp_grouped.index[0], temp_grouped.index[-1],
+                    color=cmap[temp_grouped.at[temp_grouped.index[-1], m]],
+                     alpha=0.05)
+        else:
+            set1 = np.append([0], chng_pts)
+            set2 = np.append(chng_pts, [-1])
+
+            for start, end in zip(set1, set2):
+                my_index = temp_grouped.index[start:end]
+                ax.axvspan(temp_grouped.index[start], temp_grouped.index[end],
+                        color=cmap[temp_grouped.at[temp_grouped.index[end], m]],
+                        alpha=0.05)
+
+# # Add different colored intervals to legend
 handles, labels = ax.get_legend_handles_labels()
-red_patch = mpatches.Patch(color='r', label='Snow conditions present')
-green_patch = mpatches.Patch(color='g', label='No snow present')
-yellow_patch = mpatches.Patch(color='y', label='Loss [W]')
+
+modeled_line = Line2D([0], [0], label='Modeled', color='k', ls='--')
+measured_line = Line2D([0], [0], label='Measured', color='k')
+
+red_patch = mpatches.Patch(color='r', alpha=0.05, label='Mode 0')
+blue_patch = mpatches.Patch(color='b', alpha=0.05, label='Mode 1')
+yellow_patch = mpatches.Patch(color='y', alpha=0.05, label='Mode 2')
+purple_patch = mpatches.Patch(color='cyan', alpha=0.05, label='Mode 3')
+green_patch = mpatches.Patch(color='g', alpha=0.05, label='Mode 4')
+
+handles.append(measured_line) 
+handles.append(modeled_line) 
 handles.append(red_patch) 
 handles.append(green_patch)
+handles.append(blue_patch)
 handles.append(yellow_patch)
+handles.append(purple_patch)
+# handles.append(gray_patch)
 
 ax.set_xlabel('Date', fontsize='xx-large')
 ax.set_ylabel('DC Power [W]', fontsize='xx-large')
-ax.legend(handles=handles, fontsize='xx-large', loc='upper right')
+ax.legend(handles=handles, fontsize='xx-large', loc='upper left')
+ax.set_title('Measured and modeled production for INV1 CB2', fontsize='xx-large')
 
-ax2 = ax.twinx()
-ax2.bar(days, snow['SNOW'].values, color='b', alpha=0.5, width=0.2,
-        ec='k')
-ax2.set_ylabel('Snowfall [in]', c='b', fontsize='xx-large', alpha=0.5);
+#%%
 
+# Calculate daily losses occuring while the system is operating in one of the
+# four modes that are associated with the presence of snow.
 
-# %% 
-# Calculate daily snow losses
+# Daily snowfall is measured at 7:00 am of each day
+snow = pd.read_csv(snow_path, index_col='DATE') # originally in [mm]
+snow['SNOW'] *= 1/(10*2.54) # convert to [in]
 
 loss_cols = [c for c in data.columns if "Loss" in c]
 mode_cols = [c for c in data.columns if "mode" in c and "modeled" not in c]
@@ -867,8 +900,9 @@ for i, c in enumerate(columns):
            ec='k', label=c)
 
 ax.legend()
-ax.set_ylabel('Losses occurring while snow is present [%]')
+ax.set_ylabel('[%]', fontsize='xx-large')
 ax.set_xticks(xvals, days)
-ax.xaxis.set_major_formatter(date_form);       
+ax.xaxis.set_major_formatter(date_form)
+ax.set_title('Losses incurred in modes 0 -3', fontsize='xx-large');       
 
 # %%
