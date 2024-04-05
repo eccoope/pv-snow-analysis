@@ -213,19 +213,12 @@ San Juan, PR, USA, 2023, pp. 1-7. doi:`10.1109/PVSC48320.2023.10359914`
 
 '''
 
-horizon_mask = pd.read_csv(mask_path, index_col='Unnamed: 0')
-
-def apply_mask(mask, x ,y):
-    if np.isnan(x) == False:
-        if y > mask.at[int(np.floor(x)), '0']:
-            return False
-        else:
-            return True
-    else:
-        return np.nan
+horizon_mask = pd.read_csv(mask_path, index_col='Unnamed: 0').squeeze("columns")
 
 data.loc[:, 'Horizon Mask'] = data.apply(lambda x: apply_mask(
     horizon_mask, x['azimuth'], x['elevation']), axis = 1)
+
+# Exclude data collected while the sun is below the horizon
 data = data[data['Horizon Mask'] == False]
 
 # %% 

@@ -1,6 +1,34 @@
 import numpy as np
 
-# Functions for modeling the transmittance.
+def apply_mask(mask, azimuth, elevation):
+
+    """
+    Used to determine whether a given (azimuth, elevation) pair is above or
+    below a horizon profile
+
+    Parameters
+    ----------
+    mask : pd.Series
+        Series with int index of 0 - 360 (represents azimuth) and float values
+        (represents elevation [deg] of horizon profile)
+    azimuth : numeric
+        Solar azimuth angle [deg]
+    elevation : numeric
+        Solar elevation angle [deg]
+
+    Returns
+    -------
+    out : bool or NaN
+    """
+    if np.isnan(azimuth) == False:
+        if elevation > mask[int(np.floor(azimuth))]:
+            out = False
+        else:
+            out = True
+    else:
+        out = np.nan
+    
+    return out
 
 def get_irradiance_sapm(temp_cell, i_mp, imp0, c0, c1, alpha_imp,
                         irrad_ref=1000, temp_ref=25):
@@ -117,8 +145,6 @@ def get_transmission(measured_e_e, modeled_e_e, i_mp):
 
     return T
 
-
-# %% Function for categorizing snow coverage
 
 def categorize(vmp_ratio, transmission, voltage, min_dcv,
                threshold_vratio, threshold_transmission):
