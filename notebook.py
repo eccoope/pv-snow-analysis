@@ -5,19 +5,19 @@ Quantifying the effects of snow cover
 
 We classify the effect of snow on a PV system's DC array.
 
-The effect of snow is classified into one of four categories:
+The effect of snow is classified into one of five categories:
 
-    Mode 0 : The system is covered with enough opaque snow that the system is
-        offline or its voltage is below the inverter's start-up voltage.
-    Mode 1 : The system is online and covered with non-uniform snow, such that
+    Mode 0: The system is covered with enough opaque snow that the system is
+        offline due to voltage below the inverter's turn-on voltage.
+    Mode 1: The system is online and covered with non-uniform snow, such that
         both operating voltage and current are reduced.
-    Mode 2 : The system is online and covered with opaque snow, such that
+    Mode 2: The system is online and covered with opaque snow, such that
         operating voltage is reduced by the snow, but transmission
-        is consistent with snow-free conditions.
-    Mode 3 : The system is online and covered with light-transmissive snow,
+        is consistent with snow-free conditions. #TODO seems contradictory
+    Mode 3: The system is online and covered with light-transmissive snow,
         such that current is decreased but voltage is consistent with all
         system substrings being online.
-    Mode 4 : Current and voltage are consistent with snow-free conditions.
+    Mode 4: Current and voltage are consistent with snow-free conditions.
 
 The procedure involves four steps:
     1. Using measured plane-of-array (POA) irradiance and temperature, model
@@ -85,8 +85,8 @@ def get_irradiance_sapm(temp_cell, i_mp, imp0, c0, c1, alpha_imp,
 
     References
     ----------
-    .. [1] D. L. King, E.E. Boyson, and J.A. Kratochvil, Photovoltaic Array
-       Performance Model, SAND2004-3535, Sandia National Laboratories,
+    .. [1] D. L. King, E.E. Boyson, and J.A. Kratochvil, "Photovoltaic Array
+       Performance Model", SAND2004-3535, Sandia National Laboratories,
        Albuquerque, NM, 2004.
     """
 
@@ -120,9 +120,9 @@ def get_irradiance_imp(i_mp, imp0, irrad_ref=1000):
     References
     ----------
     .. [1] C. F. Abe, J. B. Dias, G. Notton, G. A. Faggianelli, G. Pigelet, and
-       D. Ouvrard, David, Estimation of the effective irradiance and bifacial
-       gain for PV arrays using the maximum power current, IEEE Journal of
-       Photovoltaics, 2022.
+       D. Ouvrard, David, "Estimation of the effective irradiance and bifacial
+       gain for PV arrays using the maximum power current", IEEE Journal of
+       Photovoltaics, 2022, pp. 432-441. :doi:`10.1109/JPHOTOV.2023.3242117`
     """
     return i_mp / imp0 * irrad_ref
 
@@ -141,7 +141,7 @@ def get_transmission(measured_e_e, modeled_e_e, i_mp):
     Parameters
     ----------
     measured_e_e : array
-        Irradiance absent the effect of snow. [W/m2]
+        Plane-of-array irradiance absent the effect of snow. [W/m2]
     modeled_e_e : array
         Effective irradiance modeled from measured current at maximum power.
         [W/m2]
@@ -158,7 +158,7 @@ def get_transmission(measured_e_e, modeled_e_e, i_mp):
     .. [1] E. C. Cooper, J. L. Braid and L. Burnham, "Identifying the
        Electrical Signature of Snow in Photovoltaic Inverter Data," 2023 IEEE
        50th Photovoltaic Specialists Conference (PVSC), San Juan, PR, USA,
-       2023, pp. 1-5. doi:`10.1109/PVSC48320.2023.10360065`
+       2023, pp. 1-5. :doi:`10.1109/PVSC48320.2023.10360065`
     """
     
     T = modeled_e_e/measured_e_e
@@ -176,49 +176,52 @@ def categorize(vmp_ratio, transmission, voltage, min_dcv,
                threshold_vratio, threshold_transmission):
     
     """
-    Categorizes electrical behavior into a snow-related or snow-free "mode"
-    as defined in [1].
+    Categorizes electrical behavior into a snow-related mode.
 
-    Mode 0 = system is covered with enough opaque snow that the system is
-    offline or its voltage is below the inverter's MPPT turn-on voltage
-    Mode 1 = system is online and covered with non-uniform snow, such that
-    both operating voltage and current are decreased by the presence of snow
-    Mode 2 = system is online and covered with opaque snow, such that
-    operating voltage is decreased by the presence of snow, but transmission
-    is consistent with snow-free conditions
-    Mode 3 = system is online and covered with light-transmissive snow, such
-    that transmission is decreased but voltage is consistent with all
-    system substrings being online
-    Mode 4 = transmisison and voltage are consistent with snow-free conditions
+    Modes are defined in [1]_:
+
+    * Mode 0: system is covered with enough opaque snow that the system is
+      offline due to voltage below the inverter's turn-on voltage.
+    * Mode 1: system is online and covered with non-uniform snow, such that
+      both operating voltage and current are decreased by the presence of snow.
+    * Mode 2: system is online and covered with opaque snow, such that
+      operating voltage is decreased by the presence of snow, but transmission
+      is consistent with snow-free conditions.
+    * Mode 3: system is online and covered with light-transmissive snow, such
+      that transmission is decreased but voltage is consistent with all
+      system substrings being online.
+    * Mode 4: transmisison and voltage are consistent with snow-free
+      conditions.
 
     Parameters
     ----------
     vratio : float
         Ratio between measured voltage and voltage modeled using
-        calculated values of transmission [dimensionless]
+        calculated values of transmission. [dimensionless]
     transmission : float
-        Fraction of irradiance measured by an onsite pyranometer that the
-        array is able to utilize [dimensionless]
+        Fraction of plane-of-array irradiance that can reach the array's cells
+        through the snow cover. [dimensionless]
     voltage : float
         [V]
     min_dcv : float
         The lower voltage bound on the inverter's maximum power point
         tracking (MPPT) algorithm. [V]
     threshold_vratio : float
-        The lower bound on vratio that is found under snow-free conditions,
-        determined empirically.
+        The lower bound for vratio that is representative of snow-free
+        conditions. Determined empirically. Depends on system configuration and
+        site conditions. [unitless]
     threshold_transmission : float
         The lower bound on transmission that is found under snow-free
-        conditions, determined empirically.
+        conditions, determined empirically. [unitless]
 
     Returns
     -------
     mode : int
 
-    [1] E. C. Cooper, J. L. Braid and L. M. Burnham, "Identifying the
-    Electrical Signature of Snow in Photovoltaic Inverter Data," 2023 IEEE
-    50th Photovoltaic Specialists Conference (PVSC), San Juan, PR, USA, 2023,
-    pp. 1-5, doi: 10.1109/PVSC48320.2023.10360065.
+    .. [1] E. C. Cooper, J. L. Braid and L. M. Burnham, "Identifying the
+       Electrical Signature of Snow in Photovoltaic Inverter Data," 2023 IEEE
+       50th Photovoltaic Specialists Conference (PVSC), San Juan, PR, USA,
+       2023, pp. 1-5, :doi:`10.1109/PVSC48320.2023.10360065`.
     """
     
     if np.isnan(vmp_ratio) or np.isnan(transmission):
@@ -389,7 +392,7 @@ ax.legend(loc='lower left')
 # %% We want to exclude periods where array voltage is affected by horizon
 # shading
 '''
-Load in and apply horizon profiling created using approach described in [1]
+Load in and apply horizon profiling created using approach described in [1].
 
 [1] J. L. Braid and B. G. Pierce, "Horizon Profiling Methods for Photovoltaic
 Arrays," 2023 IEEE 50th Photovoltaic Specialists Conference (PVSC),
@@ -559,10 +562,15 @@ def wrapper(voltage, current, temp_cell, effective_irradiance,
             coeffs, config, temp_ref=25, irrad_ref=1000):
     
     '''
-    Models effective irradiance based on measured current using the SAPM
-    calculates transmission, and uses transmission to model voltage with the
-    SAPM. Categorizes each data point as mode 0 -4 based on transmission and
+    Categorizes each data point as Mode 0-4 based on transmission and
     the ratio between measured and modeled votlage.
+
+    This function illustrates a workflow to get to snow mode:
+
+    1. Model effective irradiance based on measured current using the SAPM
+    2. Calculate transmission
+    3. Uses transmission to model voltage with the SAPM. # How is this voltage different than measured (snow-affected voltage)?
+    4. Determine the snow mode for each point.
 
     Parameters
     ----------
@@ -638,7 +646,7 @@ def wrapper(voltage, current, temp_cell, effective_irradiance,
     #                           where=((voltage > 0) & (modeled_vmp>0)))
     # vmp_ratio[modeled_vmp==0] = 0
     
-    categorize_v = np.vectorize(categorize)
+    categorize_v = np.vectorize(categorize) #TODO lets vectorize the function itself
 
     mode = categorize_v(vmp_ratio, T, voltage, config['min_dcv'],
                         config['threshold_vratio'],
